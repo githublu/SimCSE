@@ -15,6 +15,8 @@ from transformers import Trainer
 from transformers.modeling_utils import PreTrainedModel
 from transformers.training_args import ParallelMode, TrainingArguments
 from transformers.utils import logging
+import turibolt as bolt
+
 from transformers.trainer_utils import (
     PREFIX_CHECKPOINT_DIR,
     BestRun,
@@ -463,6 +465,13 @@ class CLTrainer(Trainer):
                 else:
                     tr_loss += self.training_step(model, inputs)
                 self._total_flos += self.floating_point_ops(inputs)
+
+                bolt.send_metrics(
+                    {
+                        "train_loss": tr_loss,
+                    },
+                    iteration=step,
+                )
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0 or (
                     # last step in epoch but step is always smaller than gradient_accumulation_steps

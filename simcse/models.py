@@ -16,6 +16,7 @@ from transformers.file_utils import (
 )
 from transformers.modeling_outputs import SequenceClassifierOutput, BaseModelOutputWithPoolingAndCrossAttentions
 
+
 class MLPLayer(nn.Module):
     """
     Head for getting sentence representations over RoBERTa/BERT's CLS representation.
@@ -31,6 +32,7 @@ class MLPLayer(nn.Module):
         x = self.activation(x)
 
         return x
+
 
 class Similarity(nn.Module):
     """
@@ -55,6 +57,7 @@ class Pooler(nn.Module):
     'avg_top2': average of the last two layers.
     'avg_first_last': average of the first and the last layers.
     """
+
     def __init__(self, pooler_type):
         super().__init__()
         self.pooler_type = pooler_type
@@ -94,20 +97,22 @@ def cl_init(cls, config):
     cls.init_weights()
 
 def cl_forward(cls,
-    encoder,
-    input_ids=None,
-    attention_mask=None,
-    token_type_ids=None,
-    position_ids=None,
-    head_mask=None,
-    inputs_embeds=None,
-    labels=None,
-    output_attentions=None,
-    output_hidden_states=None,
-    return_dict=None,
-    mlm_input_ids=None,
-    mlm_labels=None,
-):
+               encoder,
+               input_ids=None,
+               attention_mask=None,
+               token_type_ids=None,
+               position_ids=None,
+               head_mask=None,
+               inputs_embeds=None,
+               labels=None,
+               output_attentions=None,
+               output_hidden_states=None,
+               return_dict=None,
+               mlm_input_ids=None,
+               mlm_labels=None,
+               negative_dropout_rate=0.1,
+               negative_dropout=False
+               ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
     ori_input_ids = input_ids
     batch_size = input_ids.size(0)
@@ -134,6 +139,28 @@ def cl_forward(cls,
         output_hidden_states=True if cls.model_args.pooler_type in ['avg_top2', 'avg_first_last'] else False,
         return_dict=True,
     )
+    if negative_dropout:
+        def set_dropout(model, drop_rate:float=0):
+            for name, child in model.named_children():
+                if isinstance(child, torch.nn.Dropout):
+                    child.p = drop_rate
+                set_dropout(child, drop_rate=drop_rate)
+
+        set_dropout(encoder, negative_dropout_rate)
+
+        outputs2 = encoder(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=True if cls.model_args.pooler_type in ['avg_top2', 'avg_first_last'] else False,
+            return_dict=True,
+        )
+
+        set_dropout(encoder, 0.1)
 
     # MLM auxiliary objective
     if mlm_input_ids is not None:
@@ -151,8 +178,16 @@ def cl_forward(cls,
         )
 
     # Pooling
-    pooler_output = cls.pooler(attention_mask, outputs)
-    pooler_output = pooler_output.view((batch_size, num_sent, pooler_output.size(-1))) # (bs, num_sent, hidden)
+    if negative_dropout:
+        attention_mask = torch.cat([attention_mask, attention_mask], 0)
+        outputs.last_hidden_state = torch.cat([outputs.last_hidden_state, outputs2.last_hidden_state],
+                                              0)  # [2*2*B, token length, 768]
+        outputs.pooler_output = torch.cat([outputs.pooler_output, outputs2.pooler_output], 0)  # [2*2*B, 768]
+        pooler_output = cls.pooler(attention_mask, outputs)
+        pooler_output = pooler_output.view((batch_size, num_sent * 2, pooler_output.size(-1)))  # (bs, num_sent, hidden)
+    else:
+        pooler_output = cls.pooler(attention_mask, outputs)
+        pooler_output = pooler_output.view((batch_size, num_sent, pooler_output.size(-1)))  # (bs, num_sent, hidden)
 
     # If using "cls", we add an extra MLP layer
     # (same as BERT's original implementation) over the representation.
@@ -165,6 +200,11 @@ def cl_forward(cls,
     # Hard negative
     if num_sent == 3:
         z3 = pooler_output[:, 2]
+
+    negatives = []
+    if negative_dropout:
+        for i in range(num_sent):
+            negatives.append(pooler_output[:, -1 - i])
 
     # Gather all embeddings if using distributed training
     if dist.is_initialized() and cls.training:
@@ -195,6 +235,11 @@ def cl_forward(cls,
     if num_sent >= 3:
         z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
         cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
+
+    if negative_dropout:
+        for neg in negatives:
+            neg_cos = cls.sim(z1.unsqueeze(1), neg.unsqueeze(0))
+            cos_sim = torch.cat([cos_sim, neg_cos], 1)
 
     labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
     loss_fct = nn.CrossEntropyLoss()
@@ -242,7 +287,6 @@ def sentemb_forward(
     output_hidden_states=None,
     return_dict=None,
 ):
-
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
 
     outputs = encoder(
@@ -285,49 +329,50 @@ class BertForCL(BertPreTrainedModel):
         cl_init(self, config)
 
     def forward(self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        sent_emb=False,
-        mlm_input_ids=None,
-        mlm_labels=None,
-    ):
+                input_ids=None,
+                attention_mask=None,
+                token_type_ids=None,
+                position_ids=None,
+                head_mask=None,
+                inputs_embeds=None,
+                labels=None,
+                output_attentions=None,
+                output_hidden_states=None,
+                return_dict=None,
+                sent_emb=False,
+                mlm_input_ids=None,
+                mlm_labels=None,
+                ):
         if sent_emb:
             return sentemb_forward(self, self.bert,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-                head_mask=head_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
+                                   input_ids=input_ids,
+                                   attention_mask=attention_mask,
+                                   token_type_ids=token_type_ids,
+                                   position_ids=position_ids,
+                                   head_mask=head_mask,
+                                   inputs_embeds=inputs_embeds,
+                                   labels=labels,
+                                   output_attentions=output_attentions,
+                                   output_hidden_states=output_hidden_states,
+                                   return_dict=return_dict,
+                                   )
         else:
             return cl_forward(self, self.bert,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-                head_mask=head_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                mlm_input_ids=mlm_input_ids,
-                mlm_labels=mlm_labels,
-            )
-
+                              input_ids=input_ids,
+                              attention_mask=attention_mask,
+                              token_type_ids=token_type_ids,
+                              position_ids=position_ids,
+                              head_mask=head_mask,
+                              inputs_embeds=inputs_embeds,
+                              labels=labels,
+                              output_attentions=output_attentions,
+                              output_hidden_states=output_hidden_states,
+                              return_dict=return_dict,
+                              mlm_input_ids=mlm_input_ids,
+                              mlm_labels=mlm_labels,
+                              negative_dropout_rate=self.model_args.negative_dropout_rate,
+                              negative_dropout=self.model_args.negative_dropout,
+                              )
 
 
 class RobertaForCL(RobertaPreTrainedModel):
@@ -344,45 +389,45 @@ class RobertaForCL(RobertaPreTrainedModel):
         cl_init(self, config)
 
     def forward(self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        sent_emb=False,
-        mlm_input_ids=None,
-        mlm_labels=None,
-    ):
+                input_ids=None,
+                attention_mask=None,
+                token_type_ids=None,
+                position_ids=None,
+                head_mask=None,
+                inputs_embeds=None,
+                labels=None,
+                output_attentions=None,
+                output_hidden_states=None,
+                return_dict=None,
+                sent_emb=False,
+                mlm_input_ids=None,
+                mlm_labels=None,
+                ):
         if sent_emb:
             return sentemb_forward(self, self.roberta,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-                head_mask=head_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
+                                   input_ids=input_ids,
+                                   attention_mask=attention_mask,
+                                   token_type_ids=token_type_ids,
+                                   position_ids=position_ids,
+                                   head_mask=head_mask,
+                                   inputs_embeds=inputs_embeds,
+                                   labels=labels,
+                                   output_attentions=output_attentions,
+                                   output_hidden_states=output_hidden_states,
+                                   return_dict=return_dict,
+                                   )
         else:
             return cl_forward(self, self.roberta,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-                head_mask=head_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                mlm_input_ids=mlm_input_ids,
-                mlm_labels=mlm_labels,
-            )
+                              input_ids=input_ids,
+                              attention_mask=attention_mask,
+                              token_type_ids=token_type_ids,
+                              position_ids=position_ids,
+                              head_mask=head_mask,
+                              inputs_embeds=inputs_embeds,
+                              labels=labels,
+                              output_attentions=output_attentions,
+                              output_hidden_states=output_hidden_states,
+                              return_dict=return_dict,
+                              mlm_input_ids=mlm_input_ids,
+                              mlm_labels=mlm_labels,
+                              )
