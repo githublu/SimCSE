@@ -183,8 +183,11 @@ def cl_forward(cls,
         outputs.last_hidden_state = torch.cat([outputs.last_hidden_state, outputs2.last_hidden_state],
                                               0)  # [2*2*B, token length, 768]
         outputs.pooler_output = torch.cat([outputs.pooler_output, outputs2.pooler_output], 0)  # [2*2*B, 768]
+        if outputs.hidden_states:
+            outputs.hidden_states = torch.cat([outputs.hidden_states, outputs2.hidden_states], 0)  # [2*2*B, 768]
         pooler_output = cls.pooler(attention_mask, outputs)
-        pooler_output = pooler_output.view((batch_size, num_sent * 2, pooler_output.size(-1)))  # (bs, num_sent, hidden)
+        pooler_output = pooler_output.view((2*batch_size, num_sent, pooler_output.size(-1)))  # (bs, 2*num_sent, hidden)
+        pooler_output = torch.cat([pooler_output[:batch_size], pooler_output[batch_size:]], 1)
     else:
         pooler_output = cls.pooler(attention_mask, outputs)
         pooler_output = pooler_output.view((batch_size, num_sent, pooler_output.size(-1)))  # (bs, num_sent, hidden)

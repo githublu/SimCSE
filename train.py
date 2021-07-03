@@ -466,7 +466,8 @@ def main():
 
     if training_args.do_train:
         train_dataset = datasets["train"]
-        train_dataset = train_dataset.select(range(data_args.max_train_samples))
+        if data_args.max_train_samples:
+            train_dataset = train_dataset.select(range(data_args.max_train_samples))
         train_dataset = train_dataset.map(
             prepare_features,
             batched=True,

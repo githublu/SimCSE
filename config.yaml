@@ -1,0 +1,19 @@
+name: "SimCSE Baseline bert base"
+command: 'sh run.sh'
+resources:
+  docker_image: docker.apple.com/webanswers/autoverification:0.1.46
+  cluster: "apc_usmsc28" # "simcloud-mr2.apple.com"  "apc_usmsc28"
+  ports: ["TENSORBOARD_PORT"]
+  group: "p6:ai:siri:webqa"
+  num_gpus: 1
+  num_cpus: 4
+  memory_gb: 80
+  disk_gb: 100
+  timeout: 2d
+cluster_options:
+  simcloud:
+    gpu_memory: 32GB
+
+permissions:
+  owners: WA-AV
+  viewers: WA-AV
