@@ -1,4 +1,4 @@
-name: "SimCSE Baseline bert base"
+name: "SimCSE bert base unsup neg 0.5"
 command: 'sh run.sh'
 resources:
   docker_image: docker.apple.com/webanswers/autoverification:0.1.46

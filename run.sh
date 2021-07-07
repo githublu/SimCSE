@@ -28,12 +28,17 @@ python train.py \
     --temp 0.05 \
     --do_train \
     --do_eval
-#    --negative_dropout_rate=0.7 \
-#    --negative_dropout
+    --negative_dropout_rate=0.5 \
+    --negative_dropout
+
+python simcse_to_huggingface.py --path ${BOLT_ARTIFACT_DIR}/baseline-simcse-bert-base-uncased
 
 # run eval
 echo "START EVALUATION"
-python evaluation.py     --model_name_or_path ${BOLT_ARTIFACT_DIR}/baseline-simcse-bert-base-uncased     --pooler cls     --task_set sts     --mode test
-
+python evaluation.py \
+	--model_name_or_path ${BOLT_ARTIFACT_DIR}/baseline-simcse-bert-base-uncased \
+	--pooler cls_before_pooler \
+	--task_set full \
+	--mode test
 
 
