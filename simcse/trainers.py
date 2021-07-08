@@ -468,9 +468,9 @@ class CLTrainer(Trainer):
 
                 bolt.send_metrics(
                     {
-                        "train_loss": tr_loss.item() / step,
+                        "train_loss": tr_loss.item() / step + 1,
                     },
-                    iteration=step,
+                    iteration=step + 1,
                 )
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0 or (
