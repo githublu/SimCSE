@@ -468,7 +468,7 @@ class CLTrainer(Trainer):
 
                 bolt.send_metrics(
                     {
-                        "train_loss": tr_loss.item() / step + 1,
+                        "train_loss": tr_loss.item() / (step + 1),
                     },
                     iteration=step + 1,
                 )
