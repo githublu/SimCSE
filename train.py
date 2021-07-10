@@ -135,6 +135,12 @@ class ModelArguments:
             "help": "Use dropout as negatives"
         }
     )
+    first_input_only: bool = field(
+        default=False,
+        metadata={
+            "help": "Only use first sentence as negative after dropout"
+        }
+    )
 
 
 @dataclass

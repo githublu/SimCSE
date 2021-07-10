@@ -111,15 +111,16 @@ def cl_forward(cls,
                mlm_input_ids=None,
                mlm_labels=None,
                negative_dropout_rate=0.1,
-               negative_dropout=False
+               negative_dropout=False,
+               first_input_only=False,
                ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
     ori_input_ids = input_ids
+    first_sent_input_ids = input_ids[:, 0]
     batch_size = input_ids.size(0)
     # Number of sentences in one instance
     # 2: pair instance; 3: pair instance with a hard negative
     num_sent = input_ids.size(1)
-
     mlm_outputs = None
     # Flatten input for encoding
     input_ids = input_ids.view((-1, input_ids.size(-1))) # (bs * num_sent, len)
@@ -148,6 +149,8 @@ def cl_forward(cls,
 
         set_dropout(encoder, negative_dropout_rate)
 
+        if first_input_only:
+            input_ids = first_sent_input_ids
         outputs2 = encoder(
             input_ids,
             attention_mask=attention_mask,
@@ -375,6 +378,7 @@ class BertForCL(BertPreTrainedModel):
                               mlm_labels=mlm_labels,
                               negative_dropout_rate=self.model_args.negative_dropout_rate,
                               negative_dropout=self.model_args.negative_dropout,
+                              first_input_only=self.model_args.first_input_only,
                               )
 
 
@@ -433,4 +437,6 @@ class RobertaForCL(RobertaPreTrainedModel):
                               return_dict=return_dict,
                               mlm_input_ids=mlm_input_ids,
                               mlm_labels=mlm_labels,
+                              negative_dropout=self.model_args.negative_dropout,
+                              first_input_only=self.model_args.first_input_only,
                               )
