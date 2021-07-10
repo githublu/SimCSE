@@ -61,7 +61,8 @@ class Pooler(nn.Module):
     def __init__(self, pooler_type):
         super().__init__()
         self.pooler_type = pooler_type
-        assert self.pooler_type in ["cls", "cls_before_pooler", "avg", "avg_top2", "avg_first_last"], "unrecognized pooling type %s" % self.pooler_type
+        assert self.pooler_type in ["cls", "cls_before_pooler", "avg", "avg_top2",
+                                    "avg_first_last"], "unrecognized pooling type %s" % self.pooler_type
 
     def forward(self, attention_mask, outputs):
         last_hidden = outputs.last_hidden_state
@@ -75,12 +76,14 @@ class Pooler(nn.Module):
         elif self.pooler_type == "avg_first_last":
             first_hidden = hidden_states[0]
             last_hidden = hidden_states[-1]
-            pooled_result = ((first_hidden + last_hidden) / 2.0 * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(-1).unsqueeze(-1)
+            pooled_result = ((first_hidden + last_hidden) / 2.0 * attention_mask.unsqueeze(-1)).sum(
+                1) / attention_mask.sum(-1).unsqueeze(-1)
             return pooled_result
         elif self.pooler_type == "avg_top2":
             second_last_hidden = hidden_states[-2]
             last_hidden = hidden_states[-1]
-            pooled_result = ((last_hidden + second_last_hidden) / 2.0 * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(-1).unsqueeze(-1)
+            pooled_result = ((last_hidden + second_last_hidden) / 2.0 * attention_mask.unsqueeze(-1)).sum(
+                1) / attention_mask.sum(-1).unsqueeze(-1)
             return pooled_result
         else:
             raise NotImplementedError
@@ -95,6 +98,7 @@ def cl_init(cls, config):
     cls.mlp = MLPLayer(config)
     cls.sim = Similarity(temp=cls.model_args.temp)
     cls.init_weights()
+
 
 def cl_forward(cls,
                encoder,
@@ -115,18 +119,20 @@ def cl_forward(cls,
                first_input_only=False,
                ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
-    ori_input_ids = input_ids
     first_sent_input_ids = input_ids[:, 0]
+    first_attention_mask = attention_mask[:, 0]
+    first_token_type_ids = token_type_ids[:, 0]
+
     batch_size = input_ids.size(0)
     # Number of sentences in one instance
     # 2: pair instance; 3: pair instance with a hard negative
     num_sent = input_ids.size(1)
     mlm_outputs = None
     # Flatten input for encoding
-    input_ids = input_ids.view((-1, input_ids.size(-1))) # (bs * num_sent, len)
-    attention_mask = attention_mask.view((-1, attention_mask.size(-1))) # (bs * num_sent len)
+    input_ids = input_ids.view((-1, input_ids.size(-1)))  # (bs * num_sent, len)
+    attention_mask = attention_mask.view((-1, attention_mask.size(-1)))  # (bs * num_sent len)
     if token_type_ids is not None:
-        token_type_ids = token_type_ids.view((-1, token_type_ids.size(-1))) # (bs * num_sent, len)
+        token_type_ids = token_type_ids.view((-1, token_type_ids.size(-1)))  # (bs * num_sent, len)
 
     # Get raw embeddings
     outputs = encoder(
@@ -141,7 +147,7 @@ def cl_forward(cls,
         return_dict=True,
     )
     if negative_dropout:
-        def set_dropout(model, drop_rate:float=0):
+        def set_dropout(model, drop_rate: float = 0):
             for name, child in model.named_children():
                 if isinstance(child, torch.nn.Dropout):
                     child.p = drop_rate
@@ -151,6 +157,8 @@ def cl_forward(cls,
 
         if first_input_only:
             input_ids = first_sent_input_ids
+            attention_mask = first_attention_mask
+            token_type_ids = first_token_type_ids
         outputs2 = encoder(
             input_ids,
             attention_mask=attention_mask,
@@ -181,7 +189,7 @@ def cl_forward(cls,
         )
 
     # Pooling
-    if negative_dropout:
+    if negative_dropout and not first_input_only:
         attention_mask = torch.cat([attention_mask, attention_mask], 0)
         outputs.last_hidden_state = torch.cat([outputs.last_hidden_state, outputs2.last_hidden_state],
                                               0)  # [2*2*B, token length, 768]
@@ -189,11 +197,17 @@ def cl_forward(cls,
         if outputs.hidden_states:
             outputs.hidden_states = torch.cat([outputs.hidden_states, outputs2.hidden_states], 0)  # [2*2*B, 768]
         pooler_output = cls.pooler(attention_mask, outputs)
-        pooler_output = pooler_output.view((2*batch_size, num_sent, pooler_output.size(-1)))  # (bs, 2*num_sent, hidden)
+        pooler_output = pooler_output.view(
+            (2 * batch_size, num_sent, pooler_output.size(-1)))  # (bs, 2*num_sent, hidden)
         pooler_output = torch.cat([pooler_output[:batch_size], pooler_output[batch_size:]], 1)
     else:
         pooler_output = cls.pooler(attention_mask, outputs)
         pooler_output = pooler_output.view((batch_size, num_sent, pooler_output.size(-1)))  # (bs, num_sent, hidden)
+        if first_input_only and negative_dropout:
+            first_input_pooler_output = cls.pooler(attention_mask, outputs2)
+            first_input_pooler_output = first_input_pooler_output.view(
+                (batch_size, 1, first_input_pooler_output.size(-1)))  # (bs, num_sent, hidden)
+            pooler_output = torch.cat([pooler_output, first_input_pooler_output], 1)
 
     # If using "cls", we add an extra MLP layer
     # (same as BERT's original implementation) over the representation.
@@ -201,7 +215,7 @@ def cl_forward(cls,
         pooler_output = cls.mlp(pooler_output)
 
     # Separate representation
-    z1, z2 = pooler_output[:,0], pooler_output[:,1]
+    z1, z2 = pooler_output[:, 0], pooler_output[:, 1]
 
     # Hard negative
     if num_sent == 3:
@@ -255,7 +269,8 @@ def cl_forward(cls,
         # Note that weights are actually logits of weights
         z3_weight = cls.model_args.hard_negative_weight
         weights = torch.tensor(
-            [[0.0] * (cos_sim.size(-1) - z1_z3_cos.size(-1)) + [0.0] * i + [z3_weight] + [0.0] * (z1_z3_cos.size(-1) - i - 1) for i in range(z1_z3_cos.size(-1))]
+            [[0.0] * (cos_sim.size(-1) - z1_z3_cos.size(-1)) + [0.0] * i + [z3_weight] + [0.0] * (
+                    z1_z3_cos.size(-1) - i - 1) for i in range(z1_z3_cos.size(-1))]
         ).to(cls.device)
         cos_sim = cos_sim + weights
 
