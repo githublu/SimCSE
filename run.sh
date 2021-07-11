@@ -28,9 +28,10 @@ python train.py \
     --temp 0.05 \
     --do_train \
     --do_eval \
-    --fp16
-#    --negative_dropout_rate=0.4 \
-#    --negative_dropout
+    --fp16 \
+    --negative_dropout_rate=0.5 \
+    --negative_dropout \
+    --first_input_only
 
 python simcse_to_huggingface.py --path ${BOLT_ARTIFACT_DIR}/baseline-simcse-bert-base-uncased
 

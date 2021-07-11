@@ -3,6 +3,7 @@ pip install -r requirements.txt
 
 sh data/download_nli.sh
 
+# shellcheck disable=SC2164
 cd SentEval/data/downstream/
 bash download_dataset.sh
 
@@ -25,7 +26,9 @@ python train.py \
     --temp 0.05 \
     --do_train \
     --do_eval \
-    --fp16
+    --fp16 \
+    --negative_dropout_rate=0.6 \
+    --negative_dropout
 
 
 python simcse_to_huggingface.py --path ${BOLT_ARTIFACT_DIR}/sup-simcse-bert-base-uncased

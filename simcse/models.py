@@ -222,9 +222,12 @@ def cl_forward(cls,
         z3 = pooler_output[:, 2]
 
     negatives = []
-    if negative_dropout:
+    if negative_dropout and not first_input_only:
         for i in range(num_sent):
             negatives.append(pooler_output[:, -1 - i])
+
+    if negative_dropout and first_input_only:
+        negatives.append(pooler_output[:, 2])
 
     # Gather all embeddings if using distributed training
     if dist.is_initialized() and cls.training:
