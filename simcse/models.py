@@ -121,7 +121,7 @@ def cl_forward(cls,
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
     first_sent_input_ids = input_ids[:, 0]
     first_attention_mask = attention_mask[:, 0]
-    first_token_type_ids = token_type_ids[:, 0]
+    first_token_type_ids = None
 
     batch_size = input_ids.size(0)
     # Number of sentences in one instance
@@ -133,6 +133,7 @@ def cl_forward(cls,
     attention_mask = attention_mask.view((-1, attention_mask.size(-1)))  # (bs * num_sent len)
     if token_type_ids is not None:
         token_type_ids = token_type_ids.view((-1, token_type_ids.size(-1)))  # (bs * num_sent, len)
+        first_token_type_ids = token_type_ids[:, 0]
 
     # Get raw embeddings
     outputs = encoder(
@@ -158,7 +159,7 @@ def cl_forward(cls,
         if first_input_only:
             input_ids = first_sent_input_ids
             attention_mask = first_attention_mask
-            token_type_ids = first_token_type_ids
+            token_type_ids = first_token_type_ids if first_token_type_ids else None
         outputs2 = encoder(
             input_ids,
             attention_mask=attention_mask,
@@ -273,7 +274,7 @@ def cl_forward(cls,
         z3_weight = cls.model_args.hard_negative_weight
         weights = torch.tensor(
             [[0.0] * (cos_sim.size(-1) - z1_z3_cos.size(-1)) + [0.0] * i + [z3_weight] + [0.0] * (
-                    z1_z3_cos.size(-1) - i - 1) for i in range(z1_z3_cos.size(-1))]
+                z1_z3_cos.size(-1) - i - 1) for i in range(z1_z3_cos.size(-1))]
         ).to(cls.device)
         cos_sim = cos_sim + weights
 
