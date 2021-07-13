@@ -456,6 +456,7 @@ class RobertaForCL(RobertaPreTrainedModel):
                               return_dict=return_dict,
                               mlm_input_ids=mlm_input_ids,
                               mlm_labels=mlm_labels,
+                              negative_dropout_rate=self.model_args.negative_dropout_rate,
                               negative_dropout=self.model_args.negative_dropout,
                               first_input_only=self.model_args.first_input_only,
                               )

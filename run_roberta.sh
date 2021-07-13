@@ -15,7 +15,7 @@ python train.py \
     --train_file wiki1m_for_simcse.txt \
     --output_dir ${BOLT_ARTIFACT_DIR}/simcse-roberta-large \
     --num_train_epochs 3 \
-    --per_device_train_batch_size 512 \
+    --per_device_train_batch_size 128 \
     --learning_rate 3e-5 \
     --max_seq_length 32 \
     --evaluation_strategy steps \
@@ -29,7 +29,7 @@ python train.py \
     --do_train \
     --do_eval \
     --fp16 \
-    --negative_dropout_rate=0.5 \
+    --negative_dropout_rate 0.5 \
     --negative_dropout
 
 python simcse_to_huggingface.py --path ${BOLT_ARTIFACT_DIR}/baseline-simcse-bert-base-uncased
